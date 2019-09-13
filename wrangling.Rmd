@@ -1,0 +1,174 @@
+---
+title: "beer"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#clear workspace
+rm(list=ls())
+```
+
+```{r}
+#install packages
+require(tidyverse)
+require(dplyr)
+require(foreign)
+require(ggplot2)
+require(tree)
+require(psych)
+```
+
+```{r}
+#Load files.
+movement <- read.csv('wber.csv')
+upc <- read.csv('upcber.csv')
+store <- read.dta("demo.dta")
+customer<- read.dta('ccount.dta')
+```
+
+```{r}
+#Rename files and delete unwanted data.
+
+colnames(upc) <- c("code", "upc", "desc", "size", "case", "nitem")
+
+colnames(movement) <- c("store", "upc", "week", "move", "qty", "price", "prom", "profit", "valid", "priceHex", "profitHex")
+
+movement <- movement %>% 
+  filter(valid == 1) %>% 
+  select(-c("valid", "priceHex","profitHex")) %>% 
+  mutate(sales = price * move / qty)
+
+store <- store %>%select(c("name", "city", "zip", "store", "age9", "age60", "ethnic", "educ", "nocar", "income","zone"))
+
+store$tier[store$zone ==1|store$zone ==7|store$zone ==8|store$zone ==11]<-'high'
+store$tier[store$zone ==2|store$zone ==3|store$zone ==10|store$zone ==12|store$zone ==13]<-'medium'
+store$tier[store$zone ==4|store$zone ==5|store$zone ==14|store$zone ==15]<-'low'
+store$tier[store$zone ==6|store$zone ==16]<-'CubFighter'
+
+store<-drop_na(store)
+
+```
+
+
+```{r}
+#Specify holiday weeks.
+ifelse(movement$week %in% c(95,103,112,116,119,120,128,133,141,147,156,
+                164,168,172,173,180,185,194,199,208,216,220,224,225,
+                232,238,246,251,260,268,272,276,277,284,289,298,303
+                ,312,320,324,328,329,336,341,350,356,364,372,377,
+                380,381,389,393),
+       movement$holiday <- 1, movement$holiday<-0)
+
+```
+
+```{r}
+#Specify promotion type.
+movement$prom <- as.character(movement$prom)
+movement$prom[is.na(movement$prom)] <- 'N'
+#movement$prom[movement$prom=='']<-'N'
+
+```
+
+```{r}
+upc$firm<-substr(upc$upc,start=1,stop = 3)
+table(upc$firm)
+budweiser<-filter(upc,firm==182)
+miller<-filter(upc,firm==341)
+oldstyle<-filter(upc,firm==733)
+
+budweiser[89:91,]<-upc[3:5,]
+oldstyle[106:108,]<-upc[12:14,]
+miller[101:103,]<-upc[9:11,]
+
+miller$type <- NA
+miller$type[c(1,4,5,20,22)] = 1 
+miller$type[c(42,41,2,11,12,13)] = 2 
+miller$type[c(16,3)] = 3 
+miller$type[c(6)] = 4 
+miller$type[c(7)] = 5 
+miller$type[c(52,8,9)] = 6 
+miller$type[c(10,23,24)] =  7
+miller$type[c(55,56,14,17,43,44,35,36,37,38,39,40)] = 8 
+miller$type[c(15,25,26,28)] = 9 
+miller$type[c(18,19)] = 10 
+miller$type[c(21)] = 11 
+miller$type[c(27,53,54,34)] = 12 
+miller$type[c(29,30,31,32,33)] = 13 
+miller$type[c(45,46,47)] =  14
+miller$type[c(48,49,50,51)] = 15
+
+```
+
+```{r}
+customer<-drop_na(customer)
+cb<-select(customer,c('store','date','beer'))
+cb <- cb %>% group_by(store) %>% summarise(mean(beer))
+
+```
+
+
+```{r}
+df<-right_join(movement,miller,by='upc')
+df<-left_join(df,store,by='store')
+df<-left_join(df,cb,by='store')
+
+sum(is.na(df))
+
+df<-select(df,-c(code,desc,nitem,name,city,zip))
+df<-select(df,-c(store,sales,upc,qty,price))
+
+```
+
+```{r}
+store_level<-left_join(movement,store,by='store')
+sotre_level %>%
+  group_by(tier,week)%>%
+  sum(sales)
+
+```
+
+```{r}
+
+tree.miller<-tree(move~.,data=df)
+summary(tree.miller)
+
+plot(tree.miller)
+text(tree.miller, pretty = 0)
+```
+
+
+```{r}
+require(randomForest)
+set.seed(101)
+train = sample(1:nrow(df), 0.2*nrow(df))
+
+```
+
+```{r}
+df<-na.omit(df)
+
+```
+
+```{r}
+temp <- factor(df$prom, levels = c("N", "B", "C","S"))
+df$promotion<-temp
+df<-drop_na(df)
+
+```
+
+sales~promotion+profit+holiday+age9+age60+educ+nocar+income
+```{r}
+rf.miller = randomForest(sales~promotion+profit+holiday+income,mtry=4, data = df, subset = train)
+
+rf.miller
+```
+
+```{r}
+summary(rf.miller)
+
+
+```
